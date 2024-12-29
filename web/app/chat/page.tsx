@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useRouter, useSearchParams } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
-import { ChevronDownIcon, XCircleIcon, ArrowLeftIcon } from '@heroicons/react/24/outline';
+import { ChevronDownIcon, XCircleIcon, ArrowLeftIcon, SunIcon, MoonIcon } from '@heroicons/react/24/outline';
 
 // API URL'ini tek bir yerden yönet
 const API_URL = 'https://chat-app-ec04.onrender.com';
@@ -38,8 +38,22 @@ export default function ChatPage() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [myUserId, setMyUserId] = useState<string>("");
   const [roomCreator, setRoomCreator] = useState<string>("");
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') === 'dark';
+    }
+    return false;
+  });
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Tema değiştirme fonksiyonu
+  const toggleTheme = () => {
+    const newTheme = !isDark;
+    setIsDark(newTheme);
+    localStorage.setItem('theme', newTheme ? 'dark' : 'light');
+    document.documentElement.classList.toggle('dark');
+  };
 
   // Bildirim izni iste
   useEffect(() => {
@@ -272,9 +286,9 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-100">
+    <div className={`flex flex-col h-screen ${isDark ? 'dark bg-gray-900' : 'bg-gray-100'} transition-colors duration-200`}>
       <Toaster position="top-right" />
-      <div className="p-4 bg-white shadow-md">
+      <div className={`p-4 ${isDark ? 'bg-gray-800' : 'bg-white'} shadow-md`}>
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-4">
             <button
@@ -285,56 +299,80 @@ export default function ChatPage() {
               <ArrowLeftIcon className="h-5 w-5" />
               <span>Çıkış</span>
             </button>
-            <h1 className="text-2xl font-bold text-gray-800">Sohbet Odası</h1>
+            <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>Sohbet Odası</h1>
           </div>
           
-          <div className="relative">
-            <button
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className="flex items-center space-x-1 px-3 py-2 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
-            >
-              <span className="text-sm text-gray-600">Aktif Kullanıcılar ({members?.length || 0})</span>
-              <ChevronDownIcon className={`w-4 h-4 text-gray-600 transition-transform ${isDropdownOpen ? 'transform rotate-180' : ''}`} />
-            </button>
+          <div className="flex items-center space-x-4">
+            <div className="relative">
+              <button
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className={`flex items-center space-x-1 px-3 py-2 ${
+                  isDark ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-100 hover:bg-gray-200'
+                } rounded-md transition-colors`}
+              >
+                <span className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                  Aktif Kullanıcılar ({members?.length || 0})
+                </span>
+                <ChevronDownIcon className={`w-4 h-4 ${isDark ? 'text-gray-300' : 'text-gray-600'} transition-transform ${isDropdownOpen ? 'transform rotate-180' : ''}`} />
+              </button>
 
-            {isDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg z-10">
-                <div className="py-2">
-                  {members.length > 0 ? (
-                    members.map((member) => (
-                      <div
-                        key={member.id}
-                        className="px-4 py-2 hover:bg-gray-100 flex items-center justify-between"
-                      >
-                        <div className="flex items-center space-x-2">
-                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                          <span className="text-sm text-gray-600">{member.ip}</span>
-                          {member.id === myUserId && <span className="text-xs text-blue-500 ml-1">(Sen)</span>}
+              {isDropdownOpen && (
+                <div className={`absolute right-0 mt-2 w-64 ${isDark ? 'bg-gray-800' : 'bg-white'} rounded-md shadow-lg z-10`}>
+                  <div className="py-2">
+                    {members.length > 0 ? (
+                      members.map((member) => (
+                        <div
+                          key={member.id}
+                          className={`px-4 py-2 ${
+                            isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+                          } flex items-center justify-between`}
+                        >
+                          <div className="flex items-center space-x-2">
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                            <span className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                              {member.ip}
+                            </span>
+                            {member.id === myUserId && <span className="text-xs text-blue-500 ml-1">(Sen)</span>}
+                          </div>
+                          {member.id !== myUserId && localStorage.getItem('apiKey') === roomCreator && (
+                            <button
+                              onClick={() => handleKickUser(member.id)}
+                              className="text-red-500 hover:text-red-700"
+                              title="Kullanıcıyı çıkar"
+                            >
+                              <XCircleIcon className="h-5 w-5" />
+                            </button>
+                          )}
                         </div>
-                        {member.id !== myUserId && localStorage.getItem('apiKey') === roomCreator && (
-                          <button
-                            onClick={() => handleKickUser(member.id)}
-                            className="text-red-500 hover:text-red-700"
-                            title="Kullanıcıyı çıkar"
-                          >
-                            <XCircleIcon className="h-5 w-5" />
-                          </button>
-                        )}
+                      ))
+                    ) : (
+                      <div className={`px-4 py-2 text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                        Henüz kimse bağlanmadı
                       </div>
-                    ))
-                  ) : (
-                    <div className="px-4 py-2 text-sm text-gray-600">
-                      Henüz kimse bağlanmadı
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+
+            <button
+              onClick={toggleTheme}
+              className={`p-2 rounded-full ${
+                isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
+              } transition-colors`}
+              aria-label="Tema değiştir"
+            >
+              {isDark ? (
+                <SunIcon className="h-6 w-6 text-yellow-400" />
+              ) : (
+                <MoonIcon className="h-6 w-6 text-gray-600" />
+              )}
+            </button>
           </div>
         </div>
       </div>
       
-      <div className="flex-1 p-4 overflow-y-auto">
+      <div className={`flex-1 p-4 overflow-y-auto ${isDark ? 'bg-gray-900' : 'bg-gray-100'}`}>
         <div className="space-y-4">
           {messages.map((message) => (
             <div
@@ -345,12 +383,12 @@ export default function ChatPage() {
                 className={`max-w-[70%] p-3 rounded-lg ${
                   message.from === myUserId
                     ? 'bg-blue-500 text-white'
-                    : 'bg-white text-gray-800'
+                    : isDark ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-800'
                 } shadow-md`}
               >
                 <p className="mb-1">{message.message}</p>
                 <p className={`text-xs ${
-                  message.from === myUserId ? 'text-blue-100' : 'text-gray-500'
+                  message.from === myUserId ? 'text-blue-100' : isDark ? 'text-gray-400' : 'text-gray-500'
                 }`}>
                   {format(new Date(message.timestamp), 'dd MMMM yyyy HH:mm', { locale: tr })}
                 </p>
@@ -361,7 +399,7 @@ export default function ChatPage() {
         </div>
       </div>
 
-      <div className="p-4 bg-white border-t">
+      <div className={`p-4 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-t'}`}>
         <div className="flex space-x-2">
           <input
             type="text"
@@ -369,7 +407,11 @@ export default function ChatPage() {
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSend()}
             placeholder="Mesajınızı yazın..."
-            className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+            className={`flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              isDark 
+                ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                : 'bg-white border-gray-300 text-black'
+            }`}
           />
           <button
             onClick={handleSend}
