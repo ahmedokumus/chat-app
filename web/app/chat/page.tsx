@@ -39,6 +39,34 @@ export default function ChatPage() {
   const [myUserId, setMyUserId] = useState<string>("");
   const [roomCreator, setRoomCreator] = useState<string>("");
   const wsRef = useRef<WebSocket | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Bildirim izni iste
+  useEffect(() => {
+    if ("Notification" in window) {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  // Bildirim gönderme fonksiyonu
+  const sendNotification = (message: string, from: string) => {
+    if (
+      "Notification" in window &&
+      Notification.permission === "granted" &&
+      document.hidden && // Sayfa arka plandaysa
+      from !== myUserId // Mesaj benden değilse
+    ) {
+      new Notification("Yeni Mesaj", {
+        body: message,
+        icon: "/notification-icon.png" // İsteğe bağlı: bildirim ikonu
+      });
+    }
+  };
+
+  // Mesajlar güncellendiğinde en alta kaydır
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   // Kullanıcı çıkarma fonksiyonu
   const handleKickUser = (userId: string) => {
@@ -157,6 +185,8 @@ export default function ChatPage() {
                   from: data.from,
                   type: data.type
                 }]);
+                // Yeni mesaj geldiğinde bildirim gönder
+                sendNotification(data.message, data.from);
               }
               break;
             
@@ -327,6 +357,7 @@ export default function ChatPage() {
               </div>
             </div>
           ))}
+          <div ref={messagesEndRef} />
         </div>
       </div>
 
