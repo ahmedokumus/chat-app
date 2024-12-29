@@ -225,13 +225,17 @@ wss.on('connection', (ws, req) => {
                             roomKey: data.roomKey
                         };
                         
+                        // Mesajı odanın mesaj geçmişine ekle
                         chatRoom.messages.push(messageData);
                         
-                        // Odadaki tüm üyelere mesajı ilet
+                        // Odadaki tüm üyelere mesajı ilet (gönderen dahil)
                         chatRoom.members.forEach(memberId => {
                             const member = connectedClients.get(memberId);
-                            if (member?.ws) {
-                                member.ws.send(JSON.stringify(messageData));
+                            if (member?.ws && member.ws.readyState === WebSocket.OPEN) {
+                                member.ws.send(JSON.stringify({
+                                    ...messageData,
+                                    isNewMessage: true // Yeni mesaj olduğunu belirt
+                                }));
                             }
                         });
                     }
