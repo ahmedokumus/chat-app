@@ -24,6 +24,7 @@ const wss = new WebSocket.Server({ server });
 const connectedClients = new Map();
 const chatRooms = new Map();
 const apiKeys = new Map(); // API anahtarlarını ve oda anahtarlarını eşleştirmek için
+const roomMembers = new Map(); // Oda üyelerinin IP adreslerini takip etmek için
 
 // Benzersiz oda anahtarı oluştur
 function generateRoomKey() {
@@ -110,13 +111,42 @@ app.get('/api/room-count', (req, res) => {
   }
 });
 
+// Odadaki kullanıcıların IP adreslerini getir
+app.get('/api/room-members/:roomKey', (req, res) => {
+  try {
+    const { roomKey } = req.params;
+    const room = chatRooms.get(roomKey);
+    
+    if (!room) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Oda bulunamadı'
+      });
+    }
+
+    const members = roomMembers.get(roomKey) || [];
+    
+    res.status(200).json({
+      success: true,
+      members,
+      message: 'Oda üyeleri başarıyla alındı'
+    });
+  } catch (error) {
+    console.error('Oda üyeleri alma hatası:', error);
+    res.status(500).json({ error: 'Oda üyeleri alınırken bir hata oluştu' });
+  }
+});
+
 // WebSocket bağlantı yönetimi
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
     console.log('Yeni bir kullanıcı bağlandı');
+    
+    // Kullanıcının IP adresini al
+    const ip = req.socket.remoteAddress;
     
     // Her kullanıcı için benzersiz bir ID oluştur
     const userId = crypto.randomUUID();
-    connectedClients.set(userId, ws);
+    connectedClients.set(userId, { ws, ip });
 
     // Mesaj alma
     ws.on('message', async (message) => {
@@ -144,23 +174,34 @@ wss.on('connection', (ws) => {
                     const room = chatRooms.get(data.roomKey);
                     if (room) {
                         room.members.add(userId);
+                        
+                        // IP adresini odaya ekle
+                        if (!roomMembers.has(data.roomKey)) {
+                            roomMembers.set(data.roomKey, []);
+                        }
+                        const members = roomMembers.get(data.roomKey);
+                        if (!members.some(m => m.ip === ip)) {
+                            members.push({ id: userId, ip });
+                        }
+
+                        // Yeni katılan kullanıcıya mevcut mesajları ve üyeleri gönder
                         ws.send(JSON.stringify({
                             type: 'roomJoined',
                             roomKey: data.roomKey,
-                            messages: room.messages
+                            messages: room.messages,
+                            members: roomMembers.get(data.roomKey) || [],
+                            creator: room.creator
                         }));
                         
-                        // Odadaki diğer üyelere bildir
+                        // Odadaki tüm üyelere güncel üye listesini gönder
+                        const updatedMembers = roomMembers.get(data.roomKey) || [];
                         room.members.forEach(memberId => {
-                            if (memberId !== userId) {
-                                const memberWs = connectedClients.get(memberId);
-                                if (memberWs) {
-                                    memberWs.send(JSON.stringify({
-                                        type: 'userJoined',
-                                        userId: userId,
-                                        roomKey: data.roomKey
-                                    }));
-                                }
+                            const member = connectedClients.get(memberId);
+                            if (member?.ws) {
+                                member.ws.send(JSON.stringify({
+                                    type: 'memberListUpdate',
+                                    members: updatedMembers
+                                }));
                             }
                         });
                     } else {
@@ -177,6 +218,7 @@ wss.on('connection', (ws) => {
                     if (chatRoom && chatRoom.members.has(userId)) {
                         const messageData = {
                             type: 'chat',
+                            id: crypto.randomUUID(),
                             from: userId,
                             message: data.message,
                             timestamp: new Date().toISOString(),
@@ -187,16 +229,52 @@ wss.on('connection', (ws) => {
                         
                         // Odadaki tüm üyelere mesajı ilet
                         chatRoom.members.forEach(memberId => {
-                            if (memberId !== userId) {
-                                const memberWs = connectedClients.get(memberId);
-                                if (memberWs) {
-                                    memberWs.send(JSON.stringify(messageData));
-                                }
+                            const member = connectedClients.get(memberId);
+                            if (member?.ws) {
+                                member.ws.send(JSON.stringify(messageData));
                             }
                         });
                     }
                     break;
                     
+                case 'kickUser':
+                    const kickRoom = chatRooms.get(data.roomKey);
+                    // Odayı oluşturan kişi mi kontrol et
+                    if (kickRoom && kickRoom.creator === data.apiKey) {
+                        const targetUserId = data.targetUserId;
+                        
+                        // Kullanıcıyı odadan çıkar
+                        kickRoom.members.delete(targetUserId);
+                        
+                        // Üye listesinden kullanıcıyı kaldır
+                        const roomMembersList = roomMembers.get(data.roomKey);
+                        if (roomMembersList) {
+                            const updatedMembers = roomMembersList.filter(m => m.id !== targetUserId);
+                            roomMembers.set(data.roomKey, updatedMembers);
+                            
+                            // Odadaki tüm üyelere güncel listeyi gönder
+                            kickRoom.members.forEach(memberId => {
+                                const member = connectedClients.get(memberId);
+                                if (member?.ws) {
+                                    member.ws.send(JSON.stringify({
+                                        type: 'memberListUpdate',
+                                        members: updatedMembers
+                                    }));
+                                }
+                            });
+                        }
+                        
+                        // Çıkarılan kullanıcıya bildirim gönder
+                        const kickedUser = connectedClients.get(targetUserId);
+                        if (kickedUser?.ws) {
+                            kickedUser.ws.send(JSON.stringify({
+                                type: 'kicked',
+                                message: 'Odadan çıkarıldınız'
+                            }));
+                        }
+                    }
+                    break;
+
                 case 'publicKey':
                     // Kullanıcının public key'ini sakla
                     connectedClients.set(userId + '_publicKey', data.publicKey);
@@ -208,22 +286,35 @@ wss.on('connection', (ws) => {
                     if (leavingRoom) {
                         leavingRoom.members.delete(userId);
                         
-                        // Odada kimse kalmadıysa odayı sil
-                        if (leavingRoom.members.size === 0) {
-                            chatRooms.delete(data.roomKey);
-                        } else {
-                            // Diğer üyelere bildir
+                        // Üye listesinden kullanıcıyı kaldır
+                        const members = roomMembers.get(data.roomKey);
+                        if (members) {
+                            const updatedMembers = members.filter(m => m.id !== userId);
+                            roomMembers.set(data.roomKey, updatedMembers);
+                            
+                            // Odadaki diğer üyelere güncel listeyi gönder
                             leavingRoom.members.forEach(memberId => {
-                                const memberWs = connectedClients.get(memberId);
-                                if (memberWs) {
-                                    memberWs.send(JSON.stringify({
-                                        type: 'userLeft',
-                                        userId: userId,
-                                        roomKey: data.roomKey
+                                const member = connectedClients.get(memberId);
+                                if (member?.ws) {
+                                    member.ws.send(JSON.stringify({
+                                        type: 'memberListUpdate',
+                                        members: updatedMembers
                                     }));
                                 }
                             });
                         }
+
+                        // Odada kimse kalmadıysa odayı sil
+                        if (leavingRoom.members.size === 0) {
+                            chatRooms.delete(data.roomKey);
+                            roomMembers.delete(data.roomKey);
+                        }
+
+                        // Ayrılan kullanıcıya bildirim gönder
+                        ws.send(JSON.stringify({
+                            type: 'leftRoom',
+                            message: 'Odadan ayrıldınız'
+                        }));
                     }
                     break;
             }
@@ -241,21 +332,28 @@ wss.on('connection', (ws) => {
             if (room.members.has(userId)) {
                 room.members.delete(userId);
                 
-                // Odada kimse kalmadıysa odayı sil
-                if (room.members.size === 0) {
-                    chatRooms.delete(roomKey);
-                } else {
-                    // Diğer üyelere bildir
+                // Üye listesinden kullanıcıyı kaldır
+                const members = roomMembers.get(roomKey);
+                if (members) {
+                    const updatedMembers = members.filter(m => m.id !== userId);
+                    roomMembers.set(roomKey, updatedMembers);
+                    
+                    // Odadaki diğer üyelere güncel listeyi gönder
                     room.members.forEach(memberId => {
-                        const memberWs = connectedClients.get(memberId);
-                        if (memberWs) {
-                            memberWs.send(JSON.stringify({
-                                type: 'userLeft',
-                                userId: userId,
-                                roomKey: roomKey
+                        const member = connectedClients.get(memberId);
+                        if (member?.ws) {
+                            member.ws.send(JSON.stringify({
+                                type: 'memberListUpdate',
+                                members: updatedMembers
                             }));
                         }
                     });
+                }
+                
+                // Odada kimse kalmadıysa odayı sil
+                if (room.members.size === 0) {
+                    chatRooms.delete(roomKey);
+                    roomMembers.delete(roomKey);
                 }
             }
         });
