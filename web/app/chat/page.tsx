@@ -38,6 +38,7 @@ export default function ChatPage() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [myUserId, setMyUserId] = useState<string>("");
   const [roomCreator, setRoomCreator] = useState<string>("");
+  const [roomCount, setRoomCount] = useState(0);
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('theme') === 'dark';
@@ -46,6 +47,29 @@ export default function ChatPage() {
   });
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Aktif oda sayısını al
+  useEffect(() => {
+    const fetchRoomCount = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/room-count`);
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          setRoomCount(data.count);
+        }
+      } catch {
+        console.error('Oda sayısı alınamadı');
+      }
+    };
+
+    fetchRoomCount();
+    
+    // Her 10 saniyede bir oda sayısını güncelle
+    const interval = setInterval(fetchRoomCount, 10000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   // Tema değiştirme fonksiyonu
   const toggleTheme = () => {
@@ -287,7 +311,44 @@ export default function ChatPage() {
 
   return (
     <div className={`flex flex-col h-screen ${isDark ? 'dark bg-gray-900' : 'bg-gray-100'} transition-colors duration-200`}>
+      <style jsx global>{`
+        /* Webkit (Chrome, Safari, Edge) için scroll özelleştirmesi */
+        ::-webkit-scrollbar {
+          width: 4px;
+        }
+        
+        ::-webkit-scrollbar-track {
+          background: ${isDark ? '#1F2937' : '#F3F4F6'};
+        }
+        
+        ::-webkit-scrollbar-thumb {
+          background: ${isDark ? '#4B5563' : '#D1D5DB'};
+          border-radius: 2px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+          background: ${isDark ? '#6B7280' : '#9CA3AF'};
+        }
+
+        /* Firefox için scroll özelleştirmesi */
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: ${isDark ? '#4B5563 #1F2937' : '#D1D5DB #F3F4F6'};
+        }
+      `}</style>
+      
       <Toaster position="top-right" />
+      
+      {/* Aktif Oda Sayısı Banner */}
+      <div className={`py-2 text-center ${isDark ? 'bg-gray-800 text-gray-300' : 'bg-blue-50 text-blue-600'}`}>
+        <div className="container mx-auto px-4 flex items-center justify-center space-x-2">
+          <div className={`w-3 h-3 rounded-full animate-pulse ${isDark ? 'bg-green-400' : 'bg-green-500'}`}></div>
+          <p className="text-sm font-medium">
+            Şu anda <span className="font-bold">{roomCount}</span> aktif sohbet odası bulunuyor
+          </p>
+        </div>
+      </div>
+
       <div className={`p-4 ${isDark ? 'bg-gray-800' : 'bg-white'} shadow-md`}>
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-4">
